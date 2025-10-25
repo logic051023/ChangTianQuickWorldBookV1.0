@@ -13,10 +13,12 @@ android.permissions = INTERNET
 android.api = 33
 android.minapi = 21
 android.ndk = 25b
-android.sdk = 33
 
-# 架构配置
-android.arch = armeabi-v7a
+# 修复架构配置 - 使用正确的archs参数
+android.archs = armeabi-v7a,arm64-v8a
+
+# 构建工具版本
+android.build_tools = 34.0.0
 
 # 构建优化
 android.allow_backup = True
