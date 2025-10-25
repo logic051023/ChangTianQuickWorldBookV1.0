@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-构建工具集 - 修复构建流程问题
+构建工具集 - 修复AIDL和SDK路径问题
 """
 
 import os
@@ -34,8 +34,11 @@ class BuildUtils:
             # 检查Android SDK
             self._check_android_sdk()
             
-            # 验证Buildozer配置
-            self._validate_buildozer_config()
+            # 配置Buildozer环境
+            self._setup_buildozer_environment()
+            
+            # 验证环境
+            self._validate_environment()
             
             print("✓ 构建环境设置完成")
             
@@ -49,10 +52,12 @@ class BuildUtils:
         if not self.android_home.exists():
             raise BuildError(f"Android SDK目录不存在: {self.android_home}")
         
+        print(f"Android SDK路径: {self.android_home}")
+        
         # 检查构建工具
         build_tools_dirs = list(self.android_home.glob("build-tools/*"))
         if not build_tools_dirs:
-            raise BuildError("未找到Android构建工具")
+            raise BuildError("未找到Android构建工具，请先安装构建工具")
         
         print("找到的构建工具版本:")
         for tool_dir in build_tools_dirs:
@@ -65,40 +70,84 @@ class BuildUtils:
             if aidl_path.exists():
                 print(f"✓ 找到AIDL工具: {aidl_path}")
                 aidl_found = True
+                # 确保AIDL可执行
+                aidl_path.chmod(0o755)
                 break
         
         if not aidl_found:
-            print("⚠ 警告: 未找到AIDL工具，构建可能失败")
+            # 尝试在其他位置查找
+            print("在构建工具目录中未找到AIDL，搜索整个SDK...")
+            result = subprocess.run(
+                f"find {self.android_home} -name 'aidl' -type f 2>/dev/null",
+                shell=True, capture_output=True, text=True
+            )
+            if result.stdout:
+                print("在其他位置找到的AIDL:")
+                for line in result.stdout.strip().split('\n'):
+                    if line:
+                        print(f"  - {line}")
+                        aidl_found = True
+            else:
+                raise BuildError("AIDL工具未找到，请确保Android构建工具已正确安装")
     
-    def _validate_buildozer_config(self):
-        """验证Buildozer配置"""
-        print("=== 验证Buildozer配置 ===")
+    def _setup_buildozer_environment(self):
+        """配置Buildozer环境"""
+        print("=== 配置Buildozer环境 ===")
         
-        spec_file = self.project_root / "buildozer.spec"
-        if not spec_file.exists():
-            raise BuildError("buildozer.spec文件不存在")
+        buildozer_platform_dir = Path.home() / ".buildozer" / "android" / "platform"
+        buildozer_platform_dir.mkdir(parents=True, exist_ok=True)
         
-        # 检查关键配置
-        with open(spec_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-            
-        required_configs = [
-            "android.archs",
-            "android.api",
-            "requirements"
-        ]
+        # 创建指向系统SDK的符号链接
+        sdk_link = buildozer_platform_dir / "android-sdk"
+        if sdk_link.exists():
+            if sdk_link.is_symlink():
+                sdk_link.unlink()
+            else:
+                shutil.rmtree(sdk_link)
         
-        for config in required_configs:
-            if config not in content:
-                print(f"⚠ 警告: 配置项 {config} 未找到")
+        try:
+            sdk_link.symlink_to(self.android_home)
+            print(f"✓ 创建SDK符号链接: {sdk_link} -> {self.android_home}")
+        except Exception as e:
+            print(f"✗ 创建符号链接失败: {e}")
+            # 尝试复制
+            print("尝试复制SDK...")
+            try:
+                shutil.copytree(self.android_home, sdk_link)
+                print("✓ SDK复制成功")
+            except Exception as e2:
+                print(f"✗ SDK复制失败: {e2}")
+    
+    def _validate_environment(self):
+        """验证环境设置"""
+        print("=== 验证环境 ===")
         
-        print("✓ Buildozer配置基本验证通过")
+        # 检查Buildozer
+        result = self._run_command("buildozer --version", capture=True)
+        if result.returncode != 0:
+            raise BuildError("Buildozer未正确安装")
+        print("✓ Buildozer验证通过")
+        
+        # 检查Android SDK
+        if not self.android_home.exists():
+            raise BuildError("Android SDK路径不存在")
+        print("✓ Android SDK路径验证通过")
+        
+        # 检查构建工具
+        build_tools = list(self.android_home.glob("build-tools/*"))
+        if not build_tools:
+            raise BuildError("未找到构建工具")
+        print(f"✓ 构建工具验证通过: {[bt.name for bt in build_tools]}")
     
     def run_build(self):
         """执行构建"""
         print("=== 执行APK构建 ===")
         
         try:
+            # 设置环境变量
+            os.environ['ANDROID_HOME'] = str(self.android_home)
+            os.environ['ANDROID_SDK_ROOT'] = str(self.android_home)
+            
             # 清理之前的构建
             print("清理构建环境...")
             self._run_command("buildozer android clean", check=False)
@@ -108,7 +157,7 @@ class BuildUtils:
             result = self._run_command(
                 "buildozer -v android debug", 
                 check=False,
-                capture=False  # 不捕获输出，直接显示
+                capture=False
             )
             
             if result.returncode == 0:
@@ -143,24 +192,13 @@ class BuildUtils:
                         print(f"在 {location} 找到 {len(found)} 个APK文件")
             
             if not apk_files:
-                # 检查.buildozer目录结构
-                buildozer_dir = self.project_root / ".buildozer"
-                if buildozer_dir.exists():
-                    print("Buildozer目录结构:")
-                    for path in buildozer_dir.glob("**/*"):
-                        if path.is_dir():
-                            print(f"  DIR: {path.relative_to(self.project_root)}")
-                        else:
-                            if path.suffix in ['.apk', '.log']:
-                                print(f"  FILE: {path.relative_to(self.project_root)}")
-                
                 raise BuildError("未找到APK文件")
             
             for apk in apk_files:
                 size_mb = apk.stat().st_size / (1024 * 1024)
                 print(f"✓ 找到APK: {apk.relative_to(self.project_root)} ({size_mb:.1f} MB)")
                 
-                # 如果是临时位置，复制到bin目录
+                # 确保APK在bin目录中
                 if "bin" not in str(apk):
                     bin_dir = self.project_root / "bin"
                     bin_dir.mkdir(exist_ok=True)
@@ -185,49 +223,29 @@ class BuildUtils:
             print("=== 构建日志分析 ===")
             
             with open(build_log, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
+                content = f.read()
                 
-                # 查找错误
-                error_sections = []
-                current_section = []
+                # 查找AIDL相关错误
+                if "aidl" in content.lower():
+                    print("发现AIDL相关错误:")
+                    aidl_lines = [line for line in content.split('\n') if 'aidl' in line.lower()]
+                    for line in aidl_lines[:10]:
+                        print(f"  {line}")
                 
-                for line in lines:
-                    line_lower = line.lower()
-                    if any(keyword in line_lower for keyword in ['error', 'failed', 'exception']):
-                        if current_section:
-                            error_sections.append(current_section)
-                        current_section = [line]
-                    elif current_section and line.strip():
-                        current_section.append(line)
-                    elif current_section and not line.strip():
-                        error_sections.append(current_section)
-                        current_section = []
+                # 查找许可证相关错误
+                if "license" in content.lower():
+                    print("发现许可证相关错误:")
+                    license_lines = [line for line in content.split('\n') if 'license' in line.lower()]
+                    for line in license_lines[:10]:
+                        print(f"  {line}")
                 
-                if current_section:
-                    error_sections.append(current_section)
-                
-                if error_sections:
-                    print("关键错误信息:")
-                    for i, section in enumerate(error_sections[-5:]):  # 最后5个错误段
-                        print(f"错误段 {i+1}:")
-                        for line in section[:10]:  # 每个段前10行
-                            print(f"  {line.rstrip()}")
-                else:
-                    print("未找到明显的错误信息")
-                
-                # 显示日志最后部分
-                print("构建日志最后30行:")
-                for line in lines[-30:]:
-                    print(line.rstrip())
+                # 显示最后的关键错误
+                print("最后的关键错误:")
+                error_lines = [line for line in content.split('\n') if any(keyword in line.lower() for keyword in ['error', 'failed'])]
+                for line in error_lines[-10:]:
+                    print(f"  {line}")
         else:
             print("无构建日志文件")
-            
-            # 检查.buildozer日志
-            buildozer_logs = list(self.project_root.glob(".buildozer/**/*.log"))
-            if buildozer_logs:
-                print("找到的Buildozer日志文件:")
-                for log in buildozer_logs:
-                    print(f"  - {log}")
     
     def _run_command(self, command: str, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
         """运行命令"""
@@ -237,12 +255,12 @@ class BuildUtils:
             if capture:
                 result = subprocess.run(
                     command, shell=True, capture_output=True, text=True, 
-                    timeout=1800, cwd=self.project_root  # 30分钟超时
+                    timeout=1800, cwd=self.project_root
                 )
                 if result.stdout:
-                    print(f"输出: {result.stdout[-1000:]}")  # 显示最后1000字符
+                    print(f"输出: {result.stdout[-500:]}")
                 if result.stderr:
-                    print(f"错误: {result.stderr[-1000:]}")
+                    print(f"错误: {result.stderr[-500:]}")
             else:
                 result = subprocess.run(
                     command, shell=True, timeout=1800, cwd=self.project_root
