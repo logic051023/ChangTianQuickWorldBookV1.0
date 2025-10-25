@@ -1,0 +1,2 @@
+# ChangTianQuickWorldBookV1.0
+快捷的世界书伪XML标签组转TavoJSON
