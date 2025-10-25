@@ -28,30 +28,98 @@ jobs:
           python3-pip python3-venv \
           build-essential
         
-    - name: 安装Buildozer
+    - name: 安装Buildozer和依赖
       run: |
         python -m pip install --upgrade pip
-        pip install buildozer cython==0.29.33
+        pip install buildozer cython==0.29.33 kivy==2.2.1
         buildozer --version
         
-    - name: 设置构建环境
+    - name: 安装Android构建工具
       run: |
-        python build_utils.py setup-environment
+        # 安装Android命令行工具
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        mkdir -p android-sdk
+        unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk/
+        mv android-sdk/cmdline-tools android-sdk/latest
+        
+        # 设置环境变量
+        echo "ANDROID_HOME=$PWD/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$PWD/android-sdk" >> $GITHUB_ENV
+        echo "$PWD/android-sdk/latest/bin" >> $GITHUB_PATH
+        
+        # 接受许可证
+        mkdir -p android-sdk/licenses
+        echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > android-sdk/licenses/android-sdk-license
+        echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" > android-sdk/licenses/android-sdk-preview-license
+        
+        # 安装必要的Android包
+        yes | android-sdk/latest/bin/sdkmanager --sdk_root=$PWD/android-sdk \
+          "platform-tools" \
+          "platforms;android-33" \
+          "build-tools;34.0.0" \
+          "cmdline-tools;latest"
+        
+    - name: 初始化Buildozer
+      run: |
+        buildozer init
+        # 验证配置
+        buildozer android checkconfig
         
     - name: 构建APK
       run: |
-        buildozer android debug 2>&1 | tee build.log
-        echo "BUILD_EXIT_CODE=$?" >> $GITHUB_ENV
+        # 清理之前的构建
+        buildozer android clean || true
         
-    - name: 处理构建结果
+        # 执行构建
+        buildozer -v android debug 2>&1 | tee build.log
+        
+        # 检查退出码
+        echo "BUILD_EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
+        
+    - name: 检查构建结果
+      if: always()
       run: |
-        python build_utils.py check-build-result
+        echo "=== 检查构建结果 ==="
+        if [ -d "bin" ]; then
+          echo "bin目录内容:"
+          ls -la bin/ || echo "无法列出bin目录"
+          apk_files=$(find bin -name "*.apk" -type f)
+          if [ -n "$apk_files" ]; then
+            echo "✓ 找到APK文件:"
+            echo "$apk_files"
+            for apk in $apk_files; do
+              size=$(du -h "$apk" | cut -f1)
+              echo "  - $apk ($size)"
+            done
+          else
+            echo "✗ bin目录中没有APK文件"
+          fi
+        else
+          echo "✗ bin目录不存在"
+        fi
+        
+        echo "=== 构建日志摘要 ==="
+        if [ -f "build.log" ]; then
+          echo "构建日志最后100行:"
+          tail -100 build.log
+        else
+          echo "无构建日志文件"
+        fi
         
     - name: 上传构建产物
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: 构建产物
+        name: APK构建结果
         path: |
           bin/*.apk
           build.log
+        retention-days: 7
+        
+    - name: 上传构建日志（失败时）
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: 构建失败日志
+        path: build.log
         retention-days: 7
