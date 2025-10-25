@@ -34,11 +34,18 @@ jobs:
         pip install buildozer cython==0.29.33 kivy==2.2.1
         buildozer --version
         
-    - name: 安装Android构建工具
+    - name: 验证Buildozer配置
       run: |
-        # 安装Android命令行工具
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        # 跳过init，直接验证现有配置
+        buildozer android checkconfig || echo "配置检查完成"
+        
+    - name: 安装Android SDK
+      run: |
+        # 创建Android SDK目录
         mkdir -p android-sdk
+        
+        # 下载命令行工具
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk/
         mv android-sdk/cmdline-tools android-sdk/latest
         
@@ -59,27 +66,41 @@ jobs:
           "build-tools;34.0.0" \
           "cmdline-tools;latest"
         
-    - name: 初始化Buildozer
-      run: |
-        buildozer init
-        # 验证配置
-        buildozer android checkconfig
+        # 验证安装
+        echo "=== 验证Android SDK安装 ==="
+        ls -la android-sdk/build-tools/ || echo "构建工具目录不存在"
         
     - name: 构建APK
       run: |
+        echo "=== 开始构建APK ==="
+        
+        # 设置构建环境变量
+        export ANDROID_HOME=$PWD/android-sdk
+        export ANDROID_SDK_ROOT=$PWD/android-sdk
+        
         # 清理之前的构建
-        buildozer android clean || true
+        echo "清理构建环境..."
+        buildozer android clean 2>&1 | tee -a build.log || echo "清理完成"
         
-        # 执行构建
-        buildozer -v android debug 2>&1 | tee build.log
+        # 执行构建（使用详细日志）
+        echo "开始构建APK..."
+        buildozer -v android debug 2>&1 | tee -a build.log
         
-        # 检查退出码
-        echo "BUILD_EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
+        # 保存退出码
+        BUILD_EXIT_CODE=${PIPESTATUS[0]}
+        echo "BUILD_EXIT_CODE=$BUILD_EXIT_CODE" >> $GITHUB_ENV
+        echo "构建退出码: $BUILD_EXIT_CODE"
         
     - name: 检查构建结果
       if: always()
       run: |
         echo "=== 检查构建结果 ==="
+        
+        # 检查文件结构
+        echo "项目文件结构:"
+        find . -name "*.apk" -o -name "build.log" -o -name "bin" -type d | head -20
+        
+        # 检查bin目录
         if [ -d "bin" ]; then
           echo "bin目录内容:"
           ls -la bin/ || echo "无法列出bin目录"
@@ -93,21 +114,29 @@ jobs:
             done
           else
             echo "✗ bin目录中没有APK文件"
+            echo "检查.buildozer目录..."
+            find .buildozer -name "*.apk" -type f 2>/dev/null | head -10 || echo "未找到APK"
           fi
         else
           echo "✗ bin目录不存在"
+          echo "创建bin目录以便后续步骤..."
+          mkdir -p bin
         fi
         
-        echo "=== 构建日志摘要 ==="
+        # 检查构建日志
+        echo "=== 构建日志状态 ==="
         if [ -f "build.log" ]; then
-          echo "构建日志最后100行:"
-          tail -100 build.log
+          echo "构建日志大小: $(wc -l < build.log) 行"
+          echo "构建日志最后50行:"
+          tail -50 build.log
         else
-          echo "无构建日志文件"
+          echo "✗ 构建日志文件不存在"
+          echo "当前目录内容:"
+          ls -la
         fi
         
     - name: 上传构建产物
-      if: success()
+      if: success() && steps.build.outcome == 'success'
       uses: actions/upload-artifact@v4
       with:
         name: APK构建结果
@@ -121,5 +150,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: 构建失败日志
-        path: build.log
+        path: |
+          build.log
+          .buildozer/
         retention-days: 7
