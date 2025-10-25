@@ -26,7 +26,7 @@ jobs:
         sudo apt-get install -y \
           git zip unzip openjdk-17-jdk \
           python3-pip python3-venv \
-          build-essential
+          build-essential wget curl
         
     - name: 安装Buildozer和依赖
       run: |
@@ -34,55 +34,88 @@ jobs:
         pip install buildozer cython==0.29.33 kivy==2.2.1
         buildozer --version
         
-    - name: 验证Buildozer配置
+    - name: 安装Android SDK和构建工具
       run: |
-        # 跳过init，直接验证现有配置
-        buildozer android checkconfig || echo "配置检查完成"
+        echo "=== 安装Android SDK ==="
         
-    - name: 安装Android SDK
-      run: |
-        # 创建Android SDK目录
-        mkdir -p android-sdk
+        # 创建SDK目录
+        SDK_DIR="$HOME/android-sdk"
+        mkdir -p "$SDK_DIR"
         
         # 下载命令行工具
+        cd "$SDK_DIR"
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk/
-        mv android-sdk/cmdline-tools android-sdk/latest
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        rm commandlinetools-linux-9477386_latest.zip
+        
+        # 设置正确的目录结构
+        mkdir -p cmdline-tools
+        mv cmdline-tools latest
+        mv latest cmdline-tools/
         
         # 设置环境变量
-        echo "ANDROID_HOME=$PWD/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_SDK_ROOT=$PWD/android-sdk" >> $GITHUB_ENV
-        echo "$PWD/android-sdk/latest/bin" >> $GITHUB_PATH
+        echo "ANDROID_HOME=$SDK_DIR" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$SDK_DIR" >> $GITHUB_ENV
+        echo "$SDK_DIR/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "$SDK_DIR/platform-tools" >> $GITHUB_PATH
         
-        # 接受许可证
-        mkdir -p android-sdk/licenses
-        echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > android-sdk/licenses/android-sdk-license
-        echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" > android-sdk/licenses/android-sdk-preview-license
+        # 接受所有许可证
+        mkdir -p "$SDK_DIR/licenses"
+        echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > "$SDK_DIR/licenses/android-sdk-license"
+        echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" > "$SDK_DIR/licenses/android-sdk-preview-license"
+        echo -e "\nd56f5187479451eabf01fb78af6dfcb131a6481e" > "$SDK_DIR/licenses/android-sdk-arm-dbt-license"
         
-        # 安装必要的Android包
-        yes | android-sdk/latest/bin/sdkmanager --sdk_root=$PWD/android-sdk \
+        cd "$GITHUB_WORKSPACE"
+        
+    - name: 安装Android平台和构建工具
+      run: |
+        echo "=== 安装Android平台和构建工具 ==="
+        
+        # 使用sdkmanager安装必要的包
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME \
           "platform-tools" \
           "platforms;android-33" \
-          "build-tools;34.0.0" \
-          "cmdline-tools;latest"
+          "build-tools;30.0.3" \
+          "build-tools;34.0.0"
         
         # 验证安装
-        echo "=== 验证Android SDK安装 ==="
-        ls -la android-sdk/build-tools/ || echo "构建工具目录不存在"
+        echo "=== 验证安装 ==="
+        echo "平台工具:"
+        ls -la $ANDROID_HOME/platform-tools/ || echo "平台工具未安装"
+        echo "构建工具:"
+        ls -la $ANDROID_HOME/build-tools/ || echo "构建工具未安装"
+        echo "AIDL工具:"
+        find $ANDROID_HOME -name "aidl" -type f 2>/dev/null | head -5 || echo "AIDL工具未找到"
+        
+    - name: 配置Buildozer环境
+      run: |
+        echo "=== 配置Buildozer环境 ==="
+        
+        # 创建必要的符号链接
+        mkdir -p $HOME/.buildozer/android/platform
+        cd $HOME/.buildozer/android/platform
+        
+        # 删除可能存在的旧链接
+        rm -f android-sdk android-ndk-r25b apache-ant-1.9.4
+        
+        # 创建指向系统安装的SDK的符号链接
+        ln -sf $ANDROID_HOME android-sdk
+        
+        echo "Buildozer环境配置完成"
         
     - name: 构建APK
       run: |
         echo "=== 开始构建APK ==="
         
-        # 设置构建环境变量
-        export ANDROID_HOME=$PWD/android-sdk
-        export ANDROID_SDK_ROOT=$PWD/android-sdk
+        # 设置环境变量
+        export ANDROID_HOME="$HOME/android-sdk"
+        export ANDROID_SDK_ROOT="$ANDROID_HOME"
         
         # 清理之前的构建
         echo "清理构建环境..."
-        buildozer android clean 2>&1 | tee -a build.log || echo "清理完成"
+        buildozer android clean 2>&1 | tee build.log || echo "清理完成"
         
-        # 执行构建（使用详细日志）
+        # 执行构建
         echo "开始构建APK..."
         buildozer -v android debug 2>&1 | tee -a build.log
         
@@ -98,18 +131,18 @@ jobs:
         
         # 检查文件结构
         echo "项目文件结构:"
-        find . -name "*.apk" -o -name "build.log" -o -name "bin" -type d | head -20
+        find . -maxdepth 3 -name "*.apk" -o -name "build.log" -o -name "bin" -type d 2>/dev/null | head -20
         
         # 检查bin目录
         if [ -d "bin" ]; then
           echo "bin目录内容:"
-          ls -la bin/ || echo "无法列出bin目录"
-          apk_files=$(find bin -name "*.apk" -type f)
+          ls -la bin/ 2>/dev/null || echo "无法列出bin目录"
+          apk_files=$(find bin -name "*.apk" -type f 2>/dev/null)
           if [ -n "$apk_files" ]; then
             echo "✓ 找到APK文件:"
             echo "$apk_files"
             for apk in $apk_files; do
-              size=$(du -h "$apk" | cut -f1)
+              size=$(du -h "$apk" 2>/dev/null | cut -f1 || echo "未知大小")
               echo "  - $apk ($size)"
             done
           else
@@ -127,30 +160,26 @@ jobs:
         echo "=== 构建日志状态 ==="
         if [ -f "build.log" ]; then
           echo "构建日志大小: $(wc -l < build.log) 行"
-          echo "构建日志最后50行:"
-          tail -50 build.log
+          echo "构建日志关键错误:"
+          grep -i "error\|failed\|aidl" build.log | tail -20 || echo "无关键错误信息"
         else
           echo "✗ 构建日志文件不存在"
-          echo "当前目录内容:"
-          ls -la
         fi
         
     - name: 上传构建产物
-      if: success() && steps.build.outcome == 'success'
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: APK构建结果
         path: |
           bin/*.apk
-          build.log
         retention-days: 7
         
-    - name: 上传构建日志（失败时）
-      if: failure()
+    - name: 上传构建日志
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: 构建失败日志
+        name: 构建日志
         path: |
           build.log
-          .buildozer/
         retention-days: 7
