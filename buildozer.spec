@@ -9,20 +9,27 @@ requirements = python3,kivy==2.2.1
 orientation = portrait
 android.permissions = INTERNET
 
-# 使用现代Android版本
+# 使用兼容的Android版本
 android.api = 33
 android.minapi = 21
 android.ndk = 25b
 
-# 修复架构配置 - 使用正确的archs参数
-android.archs = armeabi-v7a,arm64-v8a
+# 使用兼容的构建工具版本
+android.build_tools = 30.0.3
 
-# 构建工具版本
-android.build_tools = 34.0.0
+# 架构配置
+android.archs = armeabi-v7a
 
 # 构建优化
 android.allow_backup = True
 android.presplash_color = #FFFFFF
+
+# 禁用自动下载，使用系统安装的SDK
+android.skip_download = True
+android.accept_sdk_license = True
+
+# 指定SDK路径（在CI中会被环境变量覆盖）
+android.sdk_dir = /home/runner/android-sdk
 
 [buildozer]
 log_level = 2
