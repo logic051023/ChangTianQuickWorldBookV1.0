@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-构建工具集 - 简化版本，专注于核心构建功能
+构建工具集 - 配置正确的路径
 """
 
 import os
 import sys
 import subprocess
-import shutil
+import configparser
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
@@ -21,59 +21,52 @@ class BuildUtils:
     
     def __init__(self):
         self.project_root = Path(".")
-        self.buildozer_sdk_dir = Path.home() / ".buildozer" / "android" / "platform" / "android-sdk"
+        self.sdk_dir = Path(os.environ.get('ANDROID_HOME', '/home/runner/android-sdk'))
         
-    def verify_sdk_installation(self):
+    def configure_buildozer_paths(self):
+        """配置Buildozer使用正确的路径"""
+        print("=== 配置Buildozer路径 ===")
+        
+        try:
+            # 检查SDK安装
+            self._verify_sdk_installation()
+            
+            # 更新buildozer.spec文件
+            self._update_buildozer_spec()
+            
+            # 创建必要的目录
+            self._create_required_directories()
+            
+            print("✓ Buildozer配置完成")
+            
+        except Exception as e:
+            raise BuildError(f"配置失败: {e}")
+    
+    def _verify_sdk_installation(self):
         """验证SDK安装"""
         print("=== 验证Android SDK安装 ===")
         
         # 检查SDK目录是否存在
-        if not self.buildozer_sdk_dir.exists():
-            raise BuildError(f"Android SDK目录不存在: {self.buildozer_sdk_dir}")
+        if not self.sdk_dir.exists():
+            raise BuildError(f"Android SDK目录不存在: {self.sdk_dir}")
         
-        print(f"Android SDK路径: {self.buildozer_sdk_dir}")
-        
-        # 检查目录结构
-        expected_dirs = [
-            self.buildozer_sdk_dir / "cmdline-tools" / "latest" / "bin",
-            self.buildozer_sdk_dir / "platform-tools",
-            self.buildozer_sdk_dir / "build-tools",
-        ]
-        
-        for expected_dir in expected_dirs:
-            if expected_dir.exists():
-                print(f"✓ 目录存在: {expected_dir}")
-            else:
-                print(f"⚠ 目录不存在: {expected_dir}")
+        print(f"Android SDK路径: {self.sdk_dir}")
         
         # 检查sdkmanager
-        sdkmanager_path = self.buildozer_sdk_dir / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
+        sdkmanager_path = self.sdk_dir / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
         if not sdkmanager_path.exists():
-            # 尝试在其他位置查找
-            found_sdkmanager = list(self.buildozer_sdk_dir.glob("**/sdkmanager"))
-            if found_sdkmanager:
-                print(f"找到sdkmanager在非标准位置: {found_sdkmanager[0]}")
-                sdkmanager_path = found_sdkmanager[0]
-            else:
-                raise BuildError(f"sdkmanager未找到，请检查Android SDK安装")
+            raise BuildError(f"sdkmanager未找到: {sdkmanager_path}")
         
         print(f"✓ sdkmanager找到: {sdkmanager_path}")
         
-        # 确保sdkmanager可执行
-        try:
-            sdkmanager_path.chmod(0o755)
-            print("✓ sdkmanager设置为可执行")
-        except Exception as e:
-            print(f"⚠ 无法设置sdkmanager可执行: {e}")
-        
         # 检查构建工具
-        build_tools_dirs = list(self.buildozer_sdk_dir.glob("build-tools/*"))
+        build_tools_dirs = list(self.sdk_dir.glob("build-tools/*"))
         if not build_tools_dirs:
             raise BuildError("未找到Android构建工具")
-        else:
-            print("找到的构建工具版本:")
-            for tool_dir in build_tools_dirs:
-                print(f"  - {tool_dir.name}")
+        
+        print("找到的构建工具版本:")
+        for tool_dir in build_tools_dirs:
+            print(f"  - {tool_dir.name}")
         
         # 检查AIDL工具
         aidl_found = False
@@ -82,11 +75,6 @@ class BuildUtils:
             if aidl_path.exists():
                 print(f"✓ 找到AIDL工具: {aidl_path}")
                 aidl_found = True
-                try:
-                    aidl_path.chmod(0o755)
-                    print("✓ AIDL工具设置为可执行")
-                except Exception as e:
-                    print(f"⚠ 无法设置AIDL可执行: {e}")
                 break
         
         if not aidl_found:
@@ -94,21 +82,49 @@ class BuildUtils:
         
         return True
     
-    def setup_environment(self):
-        """设置构建环境"""
-        print("=== 设置构建环境 ===")
+    def _update_buildozer_spec(self):
+        """更新buildozer.spec文件"""
+        print("=== 更新buildozer.spec配置 ===")
         
-        try:
-            # 确保必要的目录存在
-            (self.project_root / "bin").mkdir(exist_ok=True)
-            
-            # 验证SDK安装
-            self.verify_sdk_installation()
-            
-            print("✓ 构建环境设置完成")
-            
-        except Exception as e:
-            raise BuildError(f"环境设置失败: {e}")
+        spec_file = self.project_root / "buildozer.spec"
+        if not spec_file.exists():
+            raise BuildError("buildozer.spec文件不存在")
+        
+        config = configparser.ConfigParser()
+        config.read(spec_file)
+        
+        # 确保有buildozer节
+        if not config.has_section('buildozer'):
+            config.add_section('buildozer')
+        
+        # 设置正确的sdkmanager路径
+        sdkmanager_path = self.sdk_dir / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
+        config.set('buildozer', 'android.sdk_manager', str(sdkmanager_path))
+        
+        # 设置SDK目录
+        config.set('app', 'android.sdk_dir', str(self.sdk_dir))
+        
+        # 写入修改
+        with open(spec_file, 'w') as f:
+            config.write(f)
+        
+        print("✓ buildozer.spec已更新")
+        print(f"  sdkmanager路径: {sdkmanager_path}")
+        print(f"  SDK目录: {self.sdk_dir}")
+    
+    def _create_required_directories(self):
+        """创建必要的目录"""
+        print("=== 创建必要的目录 ===")
+        
+        required_dirs = [
+            self.project_root / "bin",
+            Path.home() / ".buildozer" / "android" / "platform" / "python-for-android",
+            self.project_root / ".buildozer_cache"
+        ]
+        
+        for directory in required_dirs:
+            directory.mkdir(parents=True, exist_ok=True)
+            print(f"✓ 目录已创建/存在: {directory}")
     
     def run_build(self):
         """执行构建"""
@@ -116,8 +132,8 @@ class BuildUtils:
         
         try:
             # 设置环境变量
-            os.environ['ANDROID_HOME'] = str(self.buildozer_sdk_dir)
-            os.environ['ANDROID_SDK_ROOT'] = str(self.buildozer_sdk_dir)
+            os.environ['ANDROID_HOME'] = str(self.sdk_dir)
+            os.environ['ANDROID_SDK_ROOT'] = str(self.sdk_dir)
             
             print(f"环境变量设置: ANDROID_HOME={os.environ.get('ANDROID_HOME')}")
             print(f"环境变量设置: ANDROID_SDK_ROOT={os.environ.get('ANDROID_SDK_ROOT')}")
@@ -191,36 +207,23 @@ class BuildUtils:
             with open(build_log, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
                 
-                # 显示构建日志的关键部分
-                print("构建日志摘要:")
-                lines = content.split('\n')
+                # 查找关键错误
+                key_phrases = [
+                    "sdkmanager path",
+                    "does not exist",
+                    "not installed",
+                    "error",
+                    "failed"
+                ]
                 
-                # 显示开始部分
-                print("=== 构建开始 ===")
-                for i, line in enumerate(lines[:20]):
-                    print(f"{i+1}: {line}")
-                
-                # 显示错误部分
-                print("=== 构建错误 ===")
-                error_lines = []
-                for i, line in enumerate(lines):
-                    if any(keyword in line.lower() for keyword in ['error', 'failed', 'exception']):
-                        error_lines.append((i+1, line))
-                
-                for line_num, line in error_lines[-10:]:
-                    print(f"{line_num}: {line}")
-                
-                # 显示结束部分
-                print("=== 构建结束 ===")
-                for i, line in enumerate(lines[-20:]):
-                    print(f"{len(lines)-20+i+1}: {line}")
-                    
+                for phrase in key_phrases:
+                    if phrase in content.lower():
+                        print(f"发现 '{phrase}' 相关错误:")
+                        lines = [line for line in content.split('\n') if phrase in line.lower()]
+                        for line in lines[:10]:
+                            print(f"  {line}")
         else:
             print("无构建日志文件")
-            # 检查是否有其他日志文件
-            log_files = list(self.project_root.glob("*.log"))
-            if log_files:
-                print(f"找到其他日志文件: {log_files}")
     
     def _run_command(self, command: str, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
         """运行命令"""
@@ -255,23 +258,21 @@ class BuildUtils:
 def main():
     """主函数"""
     if len(sys.argv) < 2:
-        print("用法: python build_utils.py [setup-environment|run-build|check-result|verify-sdk]")
+        print("用法: python build_utils.py [configure-paths|run-build|check-result]")
         sys.exit(1)
     
     command = sys.argv[1]
     utils = BuildUtils()
     
     try:
-        if command == "setup-environment":
-            utils.setup_environment()
+        if command == "configure-paths":
+            utils.configure_buildozer_paths()
         elif command == "run-build":
             success = utils.run_build()
             sys.exit(0 if success else 1)
         elif command == "check-result":
             success = utils.check_build_result()
             sys.exit(0 if success else 1)
-        elif command == "verify-sdk":
-            utils.verify_sdk_installation()
         else:
             print(f"未知命令: {command}")
             sys.exit(1)
