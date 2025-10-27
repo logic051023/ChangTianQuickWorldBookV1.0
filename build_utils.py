@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-构建工具集 - 修复目录结构问题
+构建工具集 - 简化版本，专注于核心构建功能
 """
 
 import os
@@ -44,7 +44,7 @@ class BuildUtils:
             if expected_dir.exists():
                 print(f"✓ 目录存在: {expected_dir}")
             else:
-                print(f"✗ 目录不存在: {expected_dir}")
+                print(f"⚠ 目录不存在: {expected_dir}")
         
         # 检查sdkmanager
         sdkmanager_path = self.buildozer_sdk_dir / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
@@ -69,7 +69,7 @@ class BuildUtils:
         # 检查构建工具
         build_tools_dirs = list(self.buildozer_sdk_dir.glob("build-tools/*"))
         if not build_tools_dirs:
-            print("⚠ 警告: 未找到Android构建工具")
+            raise BuildError("未找到Android构建工具")
         else:
             print("找到的构建工具版本:")
             for tool_dir in build_tools_dirs:
@@ -90,7 +90,7 @@ class BuildUtils:
                 break
         
         if not aidl_found:
-            print("⚠ 警告: 未找到AIDL工具")
+            raise BuildError("AIDL工具未找到")
         
         return True
     
@@ -191,31 +191,36 @@ class BuildUtils:
             with open(build_log, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
                 
-                # 查找关键错误
-                key_phrases = [
-                    "error",
-                    "failed", 
-                    "not found",
-                    "no such file",
-                    "cannot find",
-                    "sdkmanager",
-                    "aidl"
-                ]
+                # 显示构建日志的关键部分
+                print("构建日志摘要:")
+                lines = content.split('\n')
                 
-                for phrase in key_phrases:
-                    if phrase in content.lower():
-                        print(f"发现 '{phrase}' 相关错误:")
-                        lines = [line for line in content.split('\n') if phrase in line.lower()]
-                        for line in lines[:5]:
-                            print(f"  {line}")
+                # 显示开始部分
+                print("=== 构建开始 ===")
+                for i, line in enumerate(lines[:20]):
+                    print(f"{i+1}: {line}")
                 
-                # 显示最后的错误
-                print("最后的错误信息:")
-                error_lines = [line for line in content.split('\n') if any(keyword in line.lower() for keyword in ['error', 'failed'])]
-                for line in error_lines[-10:]:
-                    print(f"  {line}")
+                # 显示错误部分
+                print("=== 构建错误 ===")
+                error_lines = []
+                for i, line in enumerate(lines):
+                    if any(keyword in line.lower() for keyword in ['error', 'failed', 'exception']):
+                        error_lines.append((i+1, line))
+                
+                for line_num, line in error_lines[-10:]:
+                    print(f"{line_num}: {line}")
+                
+                # 显示结束部分
+                print("=== 构建结束 ===")
+                for i, line in enumerate(lines[-20:]):
+                    print(f"{len(lines)-20+i+1}: {line}")
+                    
         else:
             print("无构建日志文件")
+            # 检查是否有其他日志文件
+            log_files = list(self.project_root.glob("*.log"))
+            if log_files:
+                print(f"找到其他日志文件: {log_files}")
     
     def _run_command(self, command: str, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
         """运行命令"""
