@@ -24,12 +24,12 @@ android.archs = armeabi-v7a
 android.allow_backup = True
 android.presplash_color = #FFFFFF
 
-# 禁用自动下载，使用系统安装的SDK
+# 允许Buildozer使用我们预安装的SDK
 android.skip_download = True
 android.accept_sdk_license = True
 
-# 指定SDK路径（在CI中会被环境变量覆盖）
-android.sdk_dir = /home/runner/android-sdk
+# SDK路径现在指向Buildozer期望的位置
+android.sdk_dir = /home/runner/.buildozer/android/platform/android-sdk
 
 [buildozer]
 log_level = 2
@@ -38,3 +38,6 @@ warn_on_root = 1
 # 构建配置
 buildozer.cache_dir = .buildozer_cache
 buildozer.parallel_build = True
+
+# 允许Buildozer下载必要的组件
+buildozer.allow_download = True
