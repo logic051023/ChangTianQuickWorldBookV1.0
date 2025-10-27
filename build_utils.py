@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-构建工具集 - 修复SDK安装问题
+构建工具集 - 简化版本，直接使用Buildozer期望的位置
 """
 
 import os
@@ -21,49 +21,37 @@ class BuildUtils:
     
     def __init__(self):
         self.project_root = Path(".")
-        self.android_home = Path(os.environ.get('ANDROID_HOME', '/home/runner/android-sdk'))
+        self.buildozer_sdk_dir = Path.home() / ".buildozer" / "android" / "platform" / "android-sdk"
         
-    def verify_sdk_installation(self):
-        """验证SDK安装"""
-        print("=== 验证Android SDK安装 ===")
+    def verify_environment(self):
+        """验证环境设置"""
+        print("=== 验证构建环境 ===")
         
-        # 检查SDK目录是否存在
-        if not self.android_home.exists():
-            raise BuildError(f"Android SDK目录不存在: {self.android_home}")
+        # 检查Buildozer
+        result = self._run_command("buildozer --version", capture=True)
+        if result.returncode != 0:
+            raise BuildError("Buildozer未正确安装")
+        print("✓ Buildozer验证通过")
         
-        print(f"Android SDK路径: {self.android_home}")
+        # 检查Android SDK
+        if not self.buildozer_sdk_dir.exists():
+            raise BuildError(f"Android SDK目录不存在: {self.buildozer_sdk_dir}")
+        print(f"✓ Android SDK目录存在: {self.buildozer_sdk_dir}")
         
         # 检查sdkmanager
-        sdkmanager_path = self.android_home / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
+        sdkmanager_path = self.buildozer_sdk_dir / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
         if not sdkmanager_path.exists():
-            # 尝试在其他位置查找
-            found_sdkmanager = False
-            for possible_path in self.android_home.glob("**/sdkmanager"):
-                if possible_path.is_file():
-                    print(f"找到sdkmanager: {possible_path}")
-                    found_sdkmanager = True
-                    break
-            
-            if not found_sdkmanager:
-                raise BuildError("sdkmanager未找到，Android SDK安装失败")
-        else:
-            print(f"✓ sdkmanager找到: {sdkmanager_path}")
-            
-            # 确保sdkmanager可执行
-            try:
-                sdkmanager_path.chmod(0o755)
-                print("✓ sdkmanager设置为可执行")
-            except Exception as e:
-                print(f"⚠ 无法设置sdkmanager可执行: {e}")
+            raise BuildError(f"sdkmanager未找到: {sdkmanager_path}")
+        print(f"✓ sdkmanager找到: {sdkmanager_path}")
         
         # 检查构建工具
-        build_tools_dirs = list(self.android_home.glob("build-tools/*"))
+        build_tools_dirs = list(self.buildozer_sdk_dir.glob("build-tools/*"))
         if not build_tools_dirs:
-            print("⚠ 警告: 未找到Android构建工具")
-        else:
-            print("找到的构建工具版本:")
-            for tool_dir in build_tools_dirs:
-                print(f"  - {tool_dir.name}")
+            raise BuildError("未找到Android构建工具")
+        
+        print("找到的构建工具版本:")
+        for tool_dir in build_tools_dirs:
+            print(f"  - {tool_dir.name}")
         
         # 检查AIDL工具
         aidl_found = False
@@ -72,19 +60,14 @@ class BuildUtils:
             if aidl_path.exists():
                 print(f"✓ 找到AIDL工具: {aidl_path}")
                 aidl_found = True
-                try:
-                    aidl_path.chmod(0o755)
-                    print("✓ AIDL工具设置为可执行")
-                except Exception as e:
-                    print(f"⚠ 无法设置AIDL可执行: {e}")
                 break
         
         if not aidl_found:
-            print("⚠ 警告: 未找到AIDL工具")
-            
-        return True
+            raise BuildError("AIDL工具未找到")
+        
+        print("✓ 环境验证完成")
     
-    def setup_build_environment(self):
+    def setup_environment(self):
         """设置构建环境"""
         print("=== 设置构建环境 ===")
         
@@ -92,39 +75,13 @@ class BuildUtils:
             # 确保必要的目录存在
             (self.project_root / "bin").mkdir(exist_ok=True)
             
-            # 验证SDK安装
-            self.verify_sdk_installation()
-            
-            # 配置Buildozer环境
-            self._setup_buildozer_environment()
+            # 验证环境
+            self.verify_environment()
             
             print("✓ 构建环境设置完成")
             
         except Exception as e:
             raise BuildError(f"环境设置失败: {e}")
-    
-    def _setup_buildozer_environment(self):
-        """配置Buildozer环境"""
-        print("=== 配置Buildozer环境 ===")
-        
-        buildozer_platform_dir = Path.home() / ".buildozer" / "android" / "platform"
-        buildozer_platform_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 创建指向系统SDK的符号链接
-        sdk_link = buildozer_platform_dir / "android-sdk"
-        if sdk_link.exists():
-            if sdk_link.is_symlink():
-                sdk_link.unlink()
-            else:
-                shutil.rmtree(sdk_link)
-        
-        try:
-            sdk_link.symlink_to(self.android_home)
-            print(f"✓ 创建SDK符号链接: {sdk_link} -> {self.android_home}")
-        except Exception as e:
-            print(f"✗ 创建符号链接失败: {e}")
-            # 如果符号链接失败，尝试使用环境变量
-            print("将依赖环境变量设置")
     
     def run_build(self):
         """执行构建"""
@@ -132,8 +89,8 @@ class BuildUtils:
         
         try:
             # 设置环境变量
-            os.environ['ANDROID_HOME'] = str(self.android_home)
-            os.environ['ANDROID_SDK_ROOT'] = str(self.android_home)
+            os.environ['ANDROID_HOME'] = str(self.buildozer_sdk_dir)
+            os.environ['ANDROID_SDK_ROOT'] = str(self.buildozer_sdk_dir)
             
             print(f"环境变量设置: ANDROID_HOME={os.environ.get('ANDROID_HOME')}")
             print(f"环境变量设置: ANDROID_SDK_ROOT={os.environ.get('ANDROID_SDK_ROOT')}")
@@ -187,14 +144,6 @@ class BuildUtils:
             for apk in apk_files:
                 size_mb = apk.stat().st_size / (1024 * 1024)
                 print(f"✓ 找到APK: {apk.relative_to(self.project_root)} ({size_mb:.1f} MB)")
-                
-                # 确保APK在bin目录中
-                if "bin" not in str(apk):
-                    bin_dir = self.project_root / "bin"
-                    bin_dir.mkdir(exist_ok=True)
-                    target_apk = bin_dir / apk.name
-                    shutil.copy2(apk, target_apk)
-                    print(f"  已复制到: {target_apk}")
             
             print("✓ 构建成功!")
             return True
@@ -215,24 +164,28 @@ class BuildUtils:
             with open(build_log, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
                 
-                # 查找SDK相关错误
-                if "sdkmanager" in content.lower():
-                    print("发现sdkmanager相关错误:")
-                    sdk_lines = [line for line in content.split('\n') if 'sdkmanager' in line.lower()]
-                    for line in sdk_lines[:10]:
-                        print(f"  {line}")
+                # 查找关键错误
+                key_phrases = [
+                    "error",
+                    "failed", 
+                    "not found",
+                    "no such file",
+                    "cannot find",
+                    "sdkmanager",
+                    "aidl"
+                ]
                 
-                # 查找AIDL相关错误
-                if "aidl" in content.lower():
-                    print("发现AIDL相关错误:")
-                    aidl_lines = [line for line in content.split('\n') if 'aidl' in line.lower()]
-                    for line in aidl_lines[:10]:
-                        print(f"  {line}")
+                for phrase in key_phrases:
+                    if phrase in content.lower():
+                        print(f"发现 '{phrase}' 相关错误:")
+                        lines = [line for line in content.split('\n') if phrase in line.lower()]
+                        for line in lines[:5]:
+                            print(f"  {line}")
                 
                 # 显示最后的错误
                 print("最后的错误信息:")
                 error_lines = [line for line in content.split('\n') if any(keyword in line.lower() for keyword in ['error', 'failed'])]
-                for line in error_lines[-15:]:
+                for line in error_lines[-10:]:
                     print(f"  {line}")
         else:
             print("无构建日志文件")
@@ -270,7 +223,7 @@ class BuildUtils:
 def main():
     """主函数"""
     if len(sys.argv) < 2:
-        print("用法: python build_utils.py [setup-environment|run-build|check-result|verify-sdk]")
+        print("用法: python build_utils.py [setup-environment|run-build|check-result|verify-env]")
         sys.exit(1)
     
     command = sys.argv[1]
@@ -278,15 +231,15 @@ def main():
     
     try:
         if command == "setup-environment":
-            utils.setup_build_environment()
+            utils.setup_environment()
         elif command == "run-build":
             success = utils.run_build()
             sys.exit(0 if success else 1)
         elif command == "check-result":
             success = utils.check_build_result()
             sys.exit(0 if success else 1)
-        elif command == "verify-sdk":
-            utils.verify_sdk_installation()
+        elif command == "verify-env":
+            utils.verify_environment()
         else:
             print(f"未知命令: {command}")
             sys.exit(1)
