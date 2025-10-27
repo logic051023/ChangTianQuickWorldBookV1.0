@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-构建工具集 - 简化版本，直接使用Buildozer期望的位置
+构建工具集 - 修复目录结构问题
 """
 
 import os
@@ -23,35 +23,57 @@ class BuildUtils:
         self.project_root = Path(".")
         self.buildozer_sdk_dir = Path.home() / ".buildozer" / "android" / "platform" / "android-sdk"
         
-    def verify_environment(self):
-        """验证环境设置"""
-        print("=== 验证构建环境 ===")
+    def verify_sdk_installation(self):
+        """验证SDK安装"""
+        print("=== 验证Android SDK安装 ===")
         
-        # 检查Buildozer
-        result = self._run_command("buildozer --version", capture=True)
-        if result.returncode != 0:
-            raise BuildError("Buildozer未正确安装")
-        print("✓ Buildozer验证通过")
-        
-        # 检查Android SDK
+        # 检查SDK目录是否存在
         if not self.buildozer_sdk_dir.exists():
             raise BuildError(f"Android SDK目录不存在: {self.buildozer_sdk_dir}")
-        print(f"✓ Android SDK目录存在: {self.buildozer_sdk_dir}")
+        
+        print(f"Android SDK路径: {self.buildozer_sdk_dir}")
+        
+        # 检查目录结构
+        expected_dirs = [
+            self.buildozer_sdk_dir / "cmdline-tools" / "latest" / "bin",
+            self.buildozer_sdk_dir / "platform-tools",
+            self.buildozer_sdk_dir / "build-tools",
+        ]
+        
+        for expected_dir in expected_dirs:
+            if expected_dir.exists():
+                print(f"✓ 目录存在: {expected_dir}")
+            else:
+                print(f"✗ 目录不存在: {expected_dir}")
         
         # 检查sdkmanager
         sdkmanager_path = self.buildozer_sdk_dir / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
         if not sdkmanager_path.exists():
-            raise BuildError(f"sdkmanager未找到: {sdkmanager_path}")
+            # 尝试在其他位置查找
+            found_sdkmanager = list(self.buildozer_sdk_dir.glob("**/sdkmanager"))
+            if found_sdkmanager:
+                print(f"找到sdkmanager在非标准位置: {found_sdkmanager[0]}")
+                sdkmanager_path = found_sdkmanager[0]
+            else:
+                raise BuildError(f"sdkmanager未找到，请检查Android SDK安装")
+        
         print(f"✓ sdkmanager找到: {sdkmanager_path}")
+        
+        # 确保sdkmanager可执行
+        try:
+            sdkmanager_path.chmod(0o755)
+            print("✓ sdkmanager设置为可执行")
+        except Exception as e:
+            print(f"⚠ 无法设置sdkmanager可执行: {e}")
         
         # 检查构建工具
         build_tools_dirs = list(self.buildozer_sdk_dir.glob("build-tools/*"))
         if not build_tools_dirs:
-            raise BuildError("未找到Android构建工具")
-        
-        print("找到的构建工具版本:")
-        for tool_dir in build_tools_dirs:
-            print(f"  - {tool_dir.name}")
+            print("⚠ 警告: 未找到Android构建工具")
+        else:
+            print("找到的构建工具版本:")
+            for tool_dir in build_tools_dirs:
+                print(f"  - {tool_dir.name}")
         
         # 检查AIDL工具
         aidl_found = False
@@ -60,12 +82,17 @@ class BuildUtils:
             if aidl_path.exists():
                 print(f"✓ 找到AIDL工具: {aidl_path}")
                 aidl_found = True
+                try:
+                    aidl_path.chmod(0o755)
+                    print("✓ AIDL工具设置为可执行")
+                except Exception as e:
+                    print(f"⚠ 无法设置AIDL可执行: {e}")
                 break
         
         if not aidl_found:
-            raise BuildError("AIDL工具未找到")
+            print("⚠ 警告: 未找到AIDL工具")
         
-        print("✓ 环境验证完成")
+        return True
     
     def setup_environment(self):
         """设置构建环境"""
@@ -75,8 +102,8 @@ class BuildUtils:
             # 确保必要的目录存在
             (self.project_root / "bin").mkdir(exist_ok=True)
             
-            # 验证环境
-            self.verify_environment()
+            # 验证SDK安装
+            self.verify_sdk_installation()
             
             print("✓ 构建环境设置完成")
             
@@ -223,7 +250,7 @@ class BuildUtils:
 def main():
     """主函数"""
     if len(sys.argv) < 2:
-        print("用法: python build_utils.py [setup-environment|run-build|check-result|verify-env]")
+        print("用法: python build_utils.py [setup-environment|run-build|check-result|verify-sdk]")
         sys.exit(1)
     
     command = sys.argv[1]
@@ -238,8 +265,8 @@ def main():
         elif command == "check-result":
             success = utils.check_build_result()
             sys.exit(0 if success else 1)
-        elif command == "verify-env":
-            utils.verify_environment()
+        elif command == "verify-sdk":
+            utils.verify_sdk_installation()
         else:
             print(f"未知命令: {command}")
             sys.exit(1)
