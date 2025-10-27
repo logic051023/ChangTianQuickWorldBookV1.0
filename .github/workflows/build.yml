@@ -144,9 +144,8 @@ jobs:
         echo "ANDROID_HOME=$ANDROID_HOME"
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
         
-        # 验证Buildozer能找到SDK
-        echo "=== 验证Buildozer环境 ==="
-        buildozer android checkconfig
+        # 直接开始构建，跳过不存在的checkconfig命令
+        echo "=== 开始构建过程 ==="
         
         # 清理之前的构建
         echo "清理构建环境..."
@@ -196,10 +195,17 @@ jobs:
         echo "=== 构建日志状态 ==="
         if [ -f "build.log" ]; then
           echo "构建日志大小: $(wc -l < build.log) 行"
-          echo "构建日志关键错误:"
+          echo "构建日志关键信息:"
+          echo "=== 构建日志前50行 ==="
+          head -50 build.log
+          echo "=== 构建日志后50行 ==="
+          tail -50 build.log
+          echo "=== 构建错误信息 ==="
           grep -i "error\|failed\|aidl\|sdkmanager\|No such file or directory" build.log | tail -20 || echo "无关键错误信息"
         else
           echo "✗ 构建日志文件不存在"
+          echo "当前目录内容:"
+          ls -la
         fi
         
     - name: 上传构建产物
