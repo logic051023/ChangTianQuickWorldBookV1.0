@@ -102,7 +102,7 @@ jobs:
         mkdir -p "$HOME/.buildozer/android/platform/python-for-android"
         
         # 修改buildozer.spec以使用正确的sdkmanager路径
-        python3 -c "
+        python3 <<EOF
 import configparser
 config = configparser.ConfigParser()
 config.read('buildozer.spec')
@@ -117,7 +117,7 @@ config.set('buildozer', 'android.sdk_manager', '$SDK_DIR/cmdline-tools/latest/bi
 # 写入修改
 with open('buildozer.spec', 'w') as f:
     config.write(f)
-"
+EOF
 
         echo "修改后的buildozer.spec内容:"
         cat buildozer.spec
