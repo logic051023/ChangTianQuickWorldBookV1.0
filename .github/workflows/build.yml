@@ -34,27 +34,17 @@ jobs:
         pip install buildozer cython==0.29.33 kivy==2.2.1
         buildozer --version
         
-    - name: 创建Buildozer目录结构
+    - name: 安装Android SDK到标准位置
       run: |
-        echo "=== 创建Buildozer期望的目录结构 ==="
+        echo "=== 安装Android SDK到标准位置 ==="
         
-        # 创建Buildozer期望的SDK目录
-        BUILDZOER_SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
-        mkdir -p "$BUILDZOER_SDK_DIR"
-        
-        echo "Buildozer SDK目录: $BUILDZOER_SDK_DIR"
-        
-    - name: 安装Android SDK到正确位置
-      run: |
-        echo "=== 安装Android SDK到正确位置 ==="
-        
-        BUILDZOER_SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
+        # 使用标准位置
+        SDK_DIR="$HOME/android-sdk"
+        mkdir -p "$SDK_DIR"
         
         # 下载命令行工具
-        cd "$BUILDZOER_SDK_DIR"
+        cd "$SDK_DIR"
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        
-        # 创建正确的目录结构
         mkdir -p cmdline-tools
         unzip -q commandlinetools-linux-9477386_latest.zip -d cmdline-tools
         rm commandlinetools-linux-9477386_latest.zip
@@ -63,80 +53,81 @@ jobs:
         mv cmdline-tools/cmdline-tools cmdline-tools/latest
         
         # 设置环境变量
-        echo "ANDROID_HOME=$BUILDZOER_SDK_DIR" >> $GITHUB_ENV
-        echo "ANDROID_SDK_ROOT=$BUILDZOER_SDK_DIR" >> $GITHUB_ENV
-        echo "$BUILDZOER_SDK_DIR/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "$BUILDZOER_SDK_DIR/platform-tools" >> $GITHUB_PATH
+        echo "ANDROID_HOME=$SDK_DIR" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$SDK_DIR" >> $GITHUB_ENV
+        echo "$SDK_DIR/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "$SDK_DIR/platform-tools" >> $GITHUB_PATH
         
         # 验证安装
         echo "=== 验证SDK安装 ==="
-        echo "目录结构:"
-        find "$BUILDZOER_SDK_DIR" -type d | sort
-        echo "sdkmanager路径:"
-        find "$BUILDZOER_SDK_DIR" -name "sdkmanager" -type f 2>/dev/null || echo "sdkmanager未找到"
-        
-        # 测试sdkmanager
-        if [ -f "$BUILDZOER_SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
-          echo "✓ sdkmanager找到，测试执行..."
-          chmod +x "$BUILDZOER_SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
-          "$BUILDZOER_SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --version || echo "sdkmanager执行失败"
-        else
-          echo "✗ sdkmanager未在期望位置找到"
-          # 尝试在其他位置查找
-          find "$BUILDZOER_SDK_DIR" -name "sdkmanager" -type f 2>/dev/null | head -5
-        fi
+        "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --version || echo "sdkmanager无法执行"
         
     - name: 安装Android平台和构建工具
       run: |
         echo "=== 安装Android平台和构建工具 ==="
         
-        BUILDZOER_SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
+        SDK_DIR="$HOME/android-sdk"
         
         # 接受许可证
-        mkdir -p "$BUILDZOER_SDK_DIR/licenses"
-        echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > "$BUILDZOER_SDK_DIR/licenses/android-sdk-license"
-        echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" > "$BUILDZOER_SDK_DIR/licenses/android-sdk-preview-license"
-        echo -e "\nd56f5187479451eabf01fb78af6dfcb131a6481e" > "$BUILDZOER_SDK_DIR/licenses/android-sdk-arm-dbt-license"
+        mkdir -p "$SDK_DIR/licenses"
+        echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55" > "$SDK_DIR/licenses/android-sdk-license"
+        echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" > "$SDK_DIR/licenses/android-sdk-preview-license"
+        echo -e "\nd56f5187479451eabf01fb78af6dfcb131a6481e" > "$SDK_DIR/licenses/android-sdk-arm-dbt-license"
         
         # 确保sdkmanager可执行
-        chmod +x "$BUILDZOER_SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
+        chmod +x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
         
         # 使用sdkmanager安装必要的包
         echo "安装platform-tools..."
-        yes | "$BUILDZOER_SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$BUILDZOER_SDK_DIR" "platform-tools"
+        yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platform-tools"
         
         echo "安装platforms;android-33..."
-        yes | "$BUILDZOER_SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$BUILDZOER_SDK_DIR" "platforms;android-33"
+        yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platforms;android-33"
         
         echo "安装build-tools;30.0.3..."
-        yes | "$BUILDZOER_SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$BUILDZOER_SDK_DIR" "build-tools;30.0.3"
+        yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "build-tools;30.0.3"
         
         # 验证安装
         echo "=== 验证安装 ==="
-        echo "SDK目录结构:"
-        find "$BUILDZOER_SDK_DIR" -maxdepth 3 -type d | sort
-        echo "平台工具:"
-        ls -la "$BUILDZOER_SDK_DIR/platform-tools/" || echo "平台工具未安装"
-        echo "构建工具:"
-        ls -la "$BUILDZOER_SDK_DIR/build-tools/" || echo "构建工具未安装"
         echo "AIDL工具:"
-        find "$BUILDZOER_SDK_DIR" -name "aidl" -type f 2>/dev/null | head -5 || echo "AIDL工具未找到"
+        find "$SDK_DIR" -name "aidl" -type f 2>/dev/null | head -5 || echo "AIDL工具未找到"
         
-    - name: 初始化python-for-android
+    - name: 配置Buildozer使用正确路径
       run: |
-        echo "=== 初始化python-for-android ==="
+        echo "=== 配置Buildozer使用正确路径 ==="
         
-        P4A_DIR="$HOME/.buildozer/android/platform/python-for-android"
-        mkdir -p "$P4A_DIR"
+        SDK_DIR="$HOME/android-sdk"
         
-        echo "python-for-android目录: $P4A_DIR"
+        # 创建必要的Buildozer目录
+        mkdir -p "$HOME/.buildozer/android/platform/python-for-android"
+        
+        # 修改buildozer.spec以使用正确的sdkmanager路径
+        python3 -c "
+import configparser
+config = configparser.ConfigParser()
+config.read('buildozer.spec')
+
+# 确保有buildozer节
+if not config.has_section('buildozer'):
+    config.add_section('buildozer')
+
+# 设置正确的sdkmanager路径
+config.set('buildozer', 'android.sdk_manager', '$SDK_DIR/cmdline-tools/latest/bin/sdkmanager')
+
+# 写入修改
+with open('buildozer.spec', 'w') as f:
+    config.write(f)
+"
+
+        echo "修改后的buildozer.spec内容:"
+        cat buildozer.spec
         
     - name: 构建APK
       run: |
         echo "=== 开始构建APK ==="
         
         # 设置环境变量
-        export ANDROID_HOME="$HOME/.buildozer/android/platform/android-sdk"
+        export ANDROID_HOME="$HOME/android-sdk"
         export ANDROID_SDK_ROOT="$ANDROID_HOME"
         
         # 验证环境
@@ -144,7 +135,7 @@ jobs:
         echo "ANDROID_HOME=$ANDROID_HOME"
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
         
-        # 直接开始构建，跳过不存在的checkconfig命令
+        # 直接开始构建
         echo "=== 开始构建过程 ==="
         
         # 清理之前的构建
@@ -196,16 +187,9 @@ jobs:
         if [ -f "build.log" ]; then
           echo "构建日志大小: $(wc -l < build.log) 行"
           echo "构建日志关键信息:"
-          echo "=== 构建日志前50行 ==="
-          head -50 build.log
-          echo "=== 构建日志后50行 ==="
-          tail -50 build.log
-          echo "=== 构建错误信息 ==="
           grep -i "error\|failed\|aidl\|sdkmanager\|No such file or directory" build.log | tail -20 || echo "无关键错误信息"
         else
           echo "✗ 构建日志文件不存在"
-          echo "当前目录内容:"
-          ls -la
         fi
         
     - name: 上传构建产物
