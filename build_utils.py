@@ -143,7 +143,7 @@ class BuildUtils:
             self._run_command("buildozer android clean", check=False)
             
             # 执行构建
-            print("开始构建APK...")
+            print "开始构建APK..."
             result = self._run_command(
                 "buildozer -v android debug", 
                 check=False,
